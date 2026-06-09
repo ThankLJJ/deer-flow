@@ -1,6 +1,6 @@
 # 🦌 DeerFlow - 2.0
 
-[English](./README.md) | [中文](./README_zh.md) | 日本語
+[English](./README.md) | [中文](./README_zh.md) | 日本語 | [Français](./README_fr.md) | [Русский](./README_ru.md)
 
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](./backend/pyproject.toml)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933?logo=node.js&logoColor=white)](./Makefile)
@@ -48,6 +48,7 @@ DeerFlowは、BytePlusが独自に開発したインテリジェント検索・�
   - [公式ウェブサイト](#公式ウェブサイト)
   - [InfoQuest](#infoquest)
   - [目次](#目次)
+  - [Coding Agent に一文でセットアップを依頼](#coding-agent-に一文でセットアップを依頼)
   - [クイックスタート](#クイックスタート)
     - [設定](#設定)
     - [アプリケーションの実行](#アプリケーションの実行)
@@ -57,6 +58,7 @@ DeerFlowは、BytePlusが独自に開発したインテリジェント検索・�
       - [サンドボックスモード](#サンドボックスモード)
       - [MCPサーバー](#mcpサーバー)
       - [IMチャネル](#imチャネル)
+      - [LangSmithトレーシング](#langsmithトレーシング)
   - [Deep Researchからスーパーエージェントハーネスへ](#deep-researchからスーパーエージェントハーネスへ)
   - [コア機能](#コア機能)
     - [スキルとツール](#スキルとツール)
@@ -68,11 +70,22 @@ DeerFlowは、BytePlusが独自に開発したインテリジェント検索・�
   - [推奨モデル](#推奨モデル)
   - [組み込みPythonクライアント](#組み込みpythonクライアント)
   - [ドキュメント](#ドキュメント)
+  - [⚠️ セキュリティに関する注意](#️-セキュリティに関する注意)
   - [コントリビュート](#コントリビュート)
   - [ライセンス](#ライセンス)
   - [謝辞](#謝辞)
     - [主要コントリビューター](#主要コントリビューター)
   - [Star History](#star-history)
+
+## Coding Agent に一文でセットアップを依頼
+
+Claude Code、Codex、Cursor、Windsurf などの coding agent を使っているなら、次の一文をそのまま渡せます。
+
+```text
+DeerFlow がまだ clone されていなければ先に clone してから、https://raw.githubusercontent.com/bytedance/deer-flow/main/Install.md に従ってローカル開発環境を初期化してください
+```
+
+このプロンプトは coding agent 向けです。必要なら先にリポジトリを clone し、Docker が使える場合は Docker を優先して初期セットアップを行い、最後に次の起動コマンドと不足している設定項目だけを返します。
 
 ## クイックスタート
 
@@ -168,7 +181,7 @@ make down   # コンテナを停止して削除
 ```
 
 > [!NOTE]
-> LangGraphエージェントサーバーは現在`langgraph dev`（オープンソースCLIサーバー）経由で実行されます。
+> Agentランタイムは現在Gateway内で実行されます。`/api/langgraph/*`はnginxによってGatewayのLangGraph-compatible APIへ書き換えられます。
 
 アクセス: http://localhost:2026
 
@@ -230,13 +243,14 @@ DeerFlowはメッセージングアプリからのタスク受信をサポート
 | Telegram | Bot API（ロングポーリング） | 簡単 |
 | Slack | Socket Mode | 中程度 |
 | Feishu / Lark | WebSocket | 中程度 |
+| DingTalk | Stream Push（WebSocket） | 中程度 |
 
 **`config.yaml`での設定：**
 
 ```yaml
 channels:
-  # LangGraphサーバーURL（デフォルト: http://localhost:2024）
-  langgraph_url: http://localhost:2024
+  # LangGraph-compatible Gateway API base URL（デフォルト: http://localhost:8001/api）
+  langgraph_url: http://localhost:8001/api
   # Gateway API URL（デフォルト: http://localhost:8001）
   gateway_url: http://localhost:8001
 
@@ -254,6 +268,8 @@ channels:
     enabled: true
     app_id: $FEISHU_APP_ID
     app_secret: $FEISHU_APP_SECRET
+    # domain: https://open.feishu.cn       # China (default)
+    # domain: https://open.larksuite.com   # International
 
   slack:
     enabled: true
@@ -279,6 +295,13 @@ channels:
           context:
             thinking_enabled: true
             subagent_enabled: true
+
+  dingtalk:
+    enabled: true
+    client_id: $DINGTALK_CLIENT_ID             # DingTalk Open PlatformのClientId
+    client_secret: $DINGTALK_CLIENT_SECRET     # DingTalk Open PlatformのClientSecret
+    allowed_users: []                          # 空 = 全員許可
+    card_template_id: ""                       # オプション：ストリーミングタイプライター効果用のAIカードテンプレートID
 ```
 
 対応するAPIキーを`.env`ファイルに設定します：
@@ -294,6 +317,10 @@ SLACK_APP_TOKEN=xapp-...
 # Feishu / Lark
 FEISHU_APP_ID=cli_xxxx
 FEISHU_APP_SECRET=your_app_secret
+
+# DingTalk
+DINGTALK_CLIENT_ID=your_client_id
+DINGTALK_CLIENT_SECRET=your_client_secret
 ```
 
 **Telegramのセットアップ**
@@ -316,6 +343,13 @@ FEISHU_APP_SECRET=your_app_secret
 3. **イベント**で`im.message.receive_v1`を購読し、**ロングコネクション**モードを選択。
 4. App IDとApp Secretをコピー。`.env`に`FEISHU_APP_ID`と`FEISHU_APP_SECRET`を設定し、`config.yaml`でチャネルを有効にします。
 
+**DingTalkのセットアップ**
+
+1. [DingTalk Open Platform](https://open.dingtalk.com/)でアプリを作成し、**ロボット**機能を有効化します。
+2. ロボット設定ページでメッセージ受信モードを**Streamモード**に設定します。
+3. `Client ID`と`Client Secret`をコピー。`.env`に`DINGTALK_CLIENT_ID`と`DINGTALK_CLIENT_SECRET`を設定し、`config.yaml`でチャネルを有効にします。
+4. *（オプション）* ストリーミングAIカード返信（タイプライター効果）を有効にするには、[DingTalkカードプラットフォーム](https://open.dingtalk.com/document/dingstart/typewriter-effect-streaming-ai-card)で**AIカード**テンプレートを作成し、`config.yaml`の`card_template_id`にテンプレートIDを設定します。`Card.Streaming.Write` および `Card.Instance.Write` 権限の申請も必要です。
+
 **コマンド**
 
 チャネル接続後、チャットから直接DeerFlowと対話できます：
@@ -329,6 +363,21 @@ FEISHU_APP_SECRET=your_app_secret
 | `/help` | ヘルプを表示 |
 
 > コマンドプレフィックスのないメッセージは通常のチャットとして扱われ、DeerFlowがスレッドを作成して会話形式で応答します。
+
+#### LangSmithトレーシング
+
+DeerFlowには[LangSmith](https://smith.langchain.com)による可観測性が組み込まれています。有効にすると、すべてのLLM呼び出し、エージェント実行、ツール実行がトレースされ、LangSmithダッシュボードで確認できます。
+
+`.env`ファイルに以下を追加します：
+
+```bash
+LANGSMITH_TRACING=true
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=lsv2_pt_xxxxxxxxxxxxxxxx
+LANGSMITH_PROJECT=xxx
+```
+
+Dockerデプロイでは、トレーシングはデフォルトで無効です。`.env`で`LANGSMITH_TRACING=true`と`LANGSMITH_API_KEY`を設定して有効にします。
 
 ## Deep Researchからスーパーエージェントハーネスへ
 
@@ -479,6 +528,24 @@ client.upload_files("thread-1", ["./report.pdf"])  # {"success": True, "files": 
 - [設定ガイド](backend/docs/CONFIGURATION.md) - セットアップと設定の手順
 - [アーキテクチャ概要](backend/CLAUDE.md) - 技術的なアーキテクチャの詳細
 - [バックエンドアーキテクチャ](backend/README.md) - バックエンドアーキテクチャとAPIリファレンス
+
+## ⚠️ セキュリティに関する注意
+
+### 不適切なデプロイはセキュリティリスクを引き起こす可能性があります
+
+DeerFlowは**システムコマンドの実行、リソース操作、ビジネスロジックの呼び出し**などの重要な高権限機能を備えており、デフォルトでは**ローカルの信頼できる環境（127.0.0.1のループバックアクセスのみ）にデプロイされる設計**になっています。信頼できないLAN、公開クラウドサーバー、または複数のエンドポイントからアクセス可能なネットワーク環境にエージェントをデプロイし、厳格なセキュリティ対策を講じない場合、以下のようなセキュリティリスクが生じる可能性があります：
+
+- **不正な違法呼び出し**：エージェントの機能が権限のない第三者や悪意のあるインターネットスキャナーに発見され、システムコマンドやファイル読み書きなどの高リスク操作を実行する不正な一括リクエストが引き起こされ、重大なセキュリティ上の問題が発生する可能性があります。
+- **コンプライアンスおよび法的リスク**：エージェントがサイバー攻撃やデータ窃取などの違法行為に不正使用された場合、法的責任やコンプライアンス上のリスクが生じる可能性があります。
+
+### セキュリティ推奨事項
+
+**注意：DeerFlowはローカルの信頼できるネットワーク環境にデプロイすることを強く推奨します。** クロスデバイス・クロスネットワークのデプロイが必要な場合は、以下のような厳格なセキュリティ対策を実装する必要があります：
+
+- **IPホワイトリストの設定**：`iptables`を使用するか、ハードウェアファイアウォール / ACL機能付きスイッチをデプロイして**IPホワイトリストルールを設定**し、他のすべてのIPアドレスからのアクセスを拒否します。
+- **前置認証**：リバースプロキシ（nginxなど）を設定し、**強力な前置認証を有効化**して、認証なしのアクセスをブロックします。
+- **ネットワーク分離**：可能であれば、エージェントと信頼できるデバイスを**同一の専用VLAN**に配置し、他のネットワークデバイスから隔離します。
+- **アップデートを継続的に確認**：DeerFlowのセキュリティ機能のアップデートを継続的にフォローしてください。
 
 ## コントリビュート
 

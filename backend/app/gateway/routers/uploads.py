@@ -1,198 +1,395 @@
 """Upload router for handling file uploads."""
 
 import logging
-from pathlib import Path
+import os
+import stat
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from pydantic import BaseModel, Field
 
-from deerflow.config.paths import VIRTUAL_PATH_PREFIX, get_paths
-from deerflow.sandbox.sandbox_provider import get_sandbox_provider
+from app.gateway.authz import require_permission
+from app.gateway.deps import get_config
+from deerflow.config.app_config import AppConfig
+from deerflow.config.paths import get_paths
+from deerflow.runtime.user_context import get_effective_user_id
+from deerflow.sandbox.sandbox_provider import SandboxProvider, get_sandbox_provider
+from deerflow.uploads.manager import (
+    PathTraversalError,
+    UnsafeUploadPathError,
+    claim_unique_filename,
+    delete_file_safe,
+    enrich_file_listing,
+    ensure_uploads_dir,
+    get_uploads_dir,
+    list_files_in_dir,
+    normalize_filename,
+    open_upload_file_no_symlink,
+    upload_artifact_url,
+    upload_virtual_path,
+)
 from deerflow.utils.file_conversion import CONVERTIBLE_EXTENSIONS, convert_file_to_markdown
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/threads/{thread_id}/uploads", tags=["uploads"])
 
+UPLOAD_CHUNK_SIZE = 8192
+DEFAULT_MAX_FILES = 10
+DEFAULT_MAX_FILE_SIZE = 50 * 1024 * 1024
+DEFAULT_MAX_TOTAL_SIZE = 100 * 1024 * 1024
+
+
+class UploadedFileInfo(BaseModel):
+    """Uploaded file metadata exposed by upload and list APIs."""
+
+    filename: str
+    size: int
+    path: str
+    virtual_path: str
+    artifact_url: str
+    extension: str | None = None
+    modified: float | None = None
+    original_filename: str | None = None
+    markdown_file: str | None = None
+    markdown_path: str | None = None
+    markdown_virtual_path: str | None = None
+    markdown_artifact_url: str | None = None
+
 
 class UploadResponse(BaseModel):
     """Response model for file upload."""
 
     success: bool
-    files: list[dict[str, str]]
+    files: list[UploadedFileInfo]
     message: str
+    skipped_files: list[str] = Field(default_factory=list)
 
 
-def get_uploads_dir(thread_id: str) -> Path:
-    """Get the uploads directory for a thread.
+class UploadListResponse(BaseModel):
+    """Response model for uploaded file listing."""
 
-    Args:
-        thread_id: The thread ID.
+    files: list[UploadedFileInfo]
+    count: int
 
-    Returns:
-        Path to the uploads directory.
+
+class UploadLimits(BaseModel):
+    """Application-level upload limits exposed to clients."""
+
+    max_files: int
+    max_file_size: int
+    max_total_size: int
+
+
+def _make_file_sandbox_writable(file_path: os.PathLike[str] | str) -> None:
+    """Ensure uploaded files remain writable when mounted into non-local sandboxes.
+
+    In AIO sandbox mode, the gateway writes the authoritative host-side file
+    first, then the sandbox runtime may rewrite the same mounted path. Granting
+    world-writable access here prevents permission mismatches between the
+    gateway user and the sandbox runtime user.
     """
-    base_dir = get_paths().sandbox_uploads_dir(thread_id)
-    base_dir.mkdir(parents=True, exist_ok=True)
-    return base_dir
+    file_stat = os.lstat(file_path)
+    if stat.S_ISLNK(file_stat.st_mode):
+        logger.warning("Skipping sandbox chmod for symlinked upload path: %s", file_path)
+        return
+
+    writable_mode = stat.S_IMODE(file_stat.st_mode) | stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH | stat.S_IRGRP | stat.S_IROTH
+    chmod_kwargs = {"follow_symlinks": False} if os.chmod in os.supports_follow_symlinks else {}
+    os.chmod(file_path, writable_mode, **chmod_kwargs)
+
+
+def _make_file_sandbox_readable(file_path: os.PathLike[str] | str) -> None:
+    """Ensure uploaded files are readable by the sandbox process.
+
+    For Docker sandboxes (AIO), the gateway writes files as root with 0o600
+    permissions, then bind-mounts the host directory into the container. The
+    sandbox process inside the container runs as a non-root user and cannot
+    read those files without group/other read bits. This function adds
+    ``S_IRGRP | S_IROTH`` so the sandbox can read the uploaded content.
+    """
+    file_stat = os.lstat(file_path)
+    if stat.S_ISLNK(file_stat.st_mode):
+        logger.warning("Skipping sandbox chmod for symlinked upload path: %s", file_path)
+        return
+
+    readable_mode = stat.S_IMODE(file_stat.st_mode) | stat.S_IRGRP | stat.S_IROTH
+    chmod_kwargs = {"follow_symlinks": False} if os.chmod in os.supports_follow_symlinks else {}
+    os.chmod(file_path, readable_mode, **chmod_kwargs)
+
+
+def _uses_thread_data_mounts(sandbox_provider: SandboxProvider) -> bool:
+    return bool(getattr(sandbox_provider, "uses_thread_data_mounts", False))
+
+
+def _get_uploads_config_value(app_config: AppConfig, key: str, default: object) -> object:
+    """Read a value from the uploads config, supporting dict and attribute access."""
+    uploads_cfg = getattr(app_config, "uploads", None)
+    if isinstance(uploads_cfg, dict):
+        return uploads_cfg.get(key, default)
+    return getattr(uploads_cfg, key, default)
+
+
+def _get_upload_limit(app_config: AppConfig, key: str, default: int, *, legacy_key: str | None = None) -> int:
+    try:
+        value = _get_uploads_config_value(app_config, key, None)
+        if value is None and legacy_key is not None:
+            value = _get_uploads_config_value(app_config, legacy_key, None)
+        if value is None:
+            value = default
+        limit = int(value)
+        if limit <= 0:
+            raise ValueError
+        return limit
+    except Exception:
+        logger.warning("Invalid uploads.%s value; falling back to %d", key, default)
+        return default
+
+
+def _get_upload_limits(app_config: AppConfig) -> UploadLimits:
+    return UploadLimits(
+        max_files=_get_upload_limit(app_config, "max_files", DEFAULT_MAX_FILES, legacy_key="max_file_count"),
+        max_file_size=_get_upload_limit(app_config, "max_file_size", DEFAULT_MAX_FILE_SIZE, legacy_key="max_single_file_size"),
+        max_total_size=_get_upload_limit(app_config, "max_total_size", DEFAULT_MAX_TOTAL_SIZE),
+    )
+
+
+def _cleanup_uploaded_paths(paths: list[os.PathLike[str] | str]) -> None:
+    for path in reversed(paths):
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            logger.warning("Failed to clean up upload path after rejected request: %s", path, exc_info=True)
+
+
+async def _write_upload_file_with_limits(
+    file: UploadFile,
+    *,
+    uploads_dir: os.PathLike[str] | str,
+    display_filename: str,
+    max_single_file_size: int,
+    max_total_size: int,
+    total_size: int,
+) -> tuple[os.PathLike[str] | str, int, int]:
+    file_size = 0
+    file_path, fh = open_upload_file_no_symlink(uploads_dir, display_filename)
+    try:
+        while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+            file_size += len(chunk)
+            total_size += len(chunk)
+            if file_size > max_single_file_size:
+                raise HTTPException(status_code=413, detail=f"File too large: {display_filename}")
+            if total_size > max_total_size:
+                raise HTTPException(status_code=413, detail="Total upload size too large")
+            fh.write(chunk)
+    except Exception:
+        fh.close()
+        try:
+            os.unlink(file_path)
+        except FileNotFoundError:
+            pass
+        raise
+    else:
+        fh.close()
+    return file_path, file_size, total_size
+
+
+def _auto_convert_documents_enabled(app_config: AppConfig) -> bool:
+    """Return whether automatic host-side document conversion is enabled.
+
+    The secure default is disabled unless an operator explicitly opts in via
+    uploads.auto_convert_documents in config.yaml.
+    """
+    try:
+        raw = _get_uploads_config_value(app_config, "auto_convert_documents", False)
+        if isinstance(raw, str):
+            return raw.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(raw)
+    except Exception:
+        return False
 
 
 @router.post("", response_model=UploadResponse)
+@require_permission("threads", "write", owner_check=True, require_existing=False)
 async def upload_files(
     thread_id: str,
+    request: Request,
     files: list[UploadFile] = File(...),
+    config: AppConfig = Depends(get_config),
 ) -> UploadResponse:
-    """Upload multiple files to a thread's uploads directory.
-
-    For PDF, PPT, Excel, and Word files, they will be converted to markdown using markitdown.
-    All files (original and converted) are saved to /mnt/user-data/uploads.
-
-    Args:
-        thread_id: The thread ID to upload files to.
-        files: List of files to upload.
-
-    Returns:
-        Upload response with success status and file information.
-    """
+    """Upload multiple files to a thread's uploads directory."""
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
-    uploads_dir = get_uploads_dir(thread_id)
-    paths = get_paths()
+    limits = _get_upload_limits(config)
+    if len(files) > limits.max_files:
+        raise HTTPException(status_code=413, detail=f"Too many files: maximum is {limits.max_files}")
+
+    try:
+        uploads_dir = ensure_uploads_dir(thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    sandbox_uploads = get_paths().sandbox_uploads_dir(thread_id, user_id=get_effective_user_id())
     uploaded_files = []
+    written_paths = []
+    sandbox_sync_targets = []
+    skipped_files = []
+    total_size = 0
+    # Track filenames within this request so duplicate form parts do not
+    # silently truncate each other. Existing uploads keep the historical
+    # overwrite behavior for a single replacement upload.
+    seen_filenames: set[str] = set()
 
     sandbox_provider = get_sandbox_provider()
-    sandbox_id = sandbox_provider.acquire(thread_id)
-    sandbox = sandbox_provider.get(sandbox_id)
+    sync_to_sandbox = not _uses_thread_data_mounts(sandbox_provider)
+    sandbox = None
+    if sync_to_sandbox:
+        sandbox_id = sandbox_provider.acquire(thread_id)
+        sandbox = sandbox_provider.get(sandbox_id)
+        if sandbox is None:
+            raise HTTPException(status_code=500, detail="Failed to acquire sandbox")
+    auto_convert_documents = _auto_convert_documents_enabled(config)
 
     for file in files:
         if not file.filename:
             continue
 
         try:
-            # Normalize filename to prevent path traversal
-            safe_filename = Path(file.filename).name
-            if not safe_filename or safe_filename in {".", ".."} or "/" in safe_filename or "\\" in safe_filename:
-                logger.warning(f"Skipping file with unsafe filename: {file.filename!r}")
-                continue
+            original_filename = normalize_filename(file.filename)
+            safe_filename = claim_unique_filename(original_filename, seen_filenames)
+        except ValueError:
+            logger.warning(f"Skipping file with unsafe filename: {file.filename!r}")
+            continue
 
-            content = await file.read()
-            file_path = uploads_dir / safe_filename
-            file_path.write_bytes(content)
+        try:
+            file_path, file_size, total_size = await _write_upload_file_with_limits(
+                file,
+                uploads_dir=uploads_dir,
+                display_filename=safe_filename,
+                max_single_file_size=limits.max_file_size,
+                max_total_size=limits.max_total_size,
+                total_size=total_size,
+            )
+            written_paths.append(file_path)
 
-            # Build relative path from backend root
-            relative_path = str(paths.sandbox_uploads_dir(thread_id) / safe_filename)
-            virtual_path = f"{VIRTUAL_PATH_PREFIX}/uploads/{safe_filename}"
+            virtual_path = upload_virtual_path(safe_filename)
 
-            # Keep local sandbox source of truth in thread-scoped host storage.
-            # For non-local sandboxes, also sync to virtual path for runtime visibility.
-            if sandbox_id != "local":
-                sandbox.update_file(virtual_path, content)
+            if sync_to_sandbox:
+                sandbox_sync_targets.append((file_path, virtual_path))
 
             file_info = {
                 "filename": safe_filename,
-                "size": str(len(content)),
-                "path": relative_path,  # Actual filesystem path (relative to backend/)
-                "virtual_path": virtual_path,  # Path for Agent in sandbox
-                "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{safe_filename}",  # HTTP URL
+                "size": file_size,
+                "path": str(sandbox_uploads / safe_filename),
+                "virtual_path": virtual_path,
+                "artifact_url": upload_artifact_url(thread_id, safe_filename),
             }
+            if safe_filename != original_filename:
+                file_info["original_filename"] = original_filename
 
-            logger.info(f"Saved file: {safe_filename} ({len(content)} bytes) to {relative_path}")
+            logger.info(f"Saved file: {safe_filename} ({file_size} bytes) to {file_info['path']}")
 
-            # Check if file should be converted to markdown
             file_ext = file_path.suffix.lower()
-            if file_ext in CONVERTIBLE_EXTENSIONS:
+            if auto_convert_documents and file_ext in CONVERTIBLE_EXTENSIONS:
                 md_path = await convert_file_to_markdown(file_path)
                 if md_path:
-                    md_relative_path = str(paths.sandbox_uploads_dir(thread_id) / md_path.name)
-                    md_virtual_path = f"{VIRTUAL_PATH_PREFIX}/uploads/{md_path.name}"
+                    written_paths.append(md_path)
+                    md_virtual_path = upload_virtual_path(md_path.name)
 
-                    if sandbox_id != "local":
-                        sandbox.update_file(md_virtual_path, md_path.read_bytes())
+                    if sync_to_sandbox:
+                        sandbox_sync_targets.append((md_path, md_virtual_path))
 
                     file_info["markdown_file"] = md_path.name
-                    file_info["markdown_path"] = md_relative_path
+                    file_info["markdown_path"] = str(sandbox_uploads / md_path.name)
                     file_info["markdown_virtual_path"] = md_virtual_path
-                    file_info["markdown_artifact_url"] = f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{md_path.name}"
+                    file_info["markdown_artifact_url"] = upload_artifact_url(thread_id, md_path.name)
 
             uploaded_files.append(file_info)
 
+        except HTTPException as e:
+            _cleanup_uploaded_paths(written_paths)
+            raise e
+        except UnsafeUploadPathError as e:
+            logger.warning("Skipping upload with unsafe destination %s: %s", file.filename, e)
+            skipped_files.append(safe_filename)
+            continue
         except Exception as e:
             logger.error(f"Failed to upload {file.filename}: {e}")
+            _cleanup_uploaded_paths(written_paths)
             raise HTTPException(status_code=500, detail=f"Failed to upload {file.filename}: {str(e)}")
 
+    # Uploaded files are created with 0o600 permissions (owner read/write only).
+    # In Docker sandbox deployments the gateway writes as root but the sandbox
+    # process runs as a non-root user (typically UID 1000).  Without group/other
+    # read bits the sandbox cannot access the files — whether the uploads
+    # directory is bind-mounted into the container or synced via
+    # sandbox.update_file.  Always add group/other read bits so every sandbox
+    # configuration can read the uploaded content.
+    for file_path in written_paths:
+        _make_file_sandbox_readable(file_path)
+
+    if sync_to_sandbox:
+        for file_path, virtual_path in sandbox_sync_targets:
+            _make_file_sandbox_writable(file_path)
+            sandbox.update_file(virtual_path, file_path.read_bytes())
+
+    message = f"Successfully uploaded {len(uploaded_files)} file(s)"
+    if skipped_files:
+        message += f"; skipped {len(skipped_files)} unsafe file(s)"
+
     return UploadResponse(
-        success=True,
+        success=not skipped_files,
         files=uploaded_files,
-        message=f"Successfully uploaded {len(uploaded_files)} file(s)",
+        message=message,
+        skipped_files=skipped_files,
     )
 
 
-@router.get("/list", response_model=dict)
-async def list_uploaded_files(thread_id: str) -> dict:
-    """List all files in a thread's uploads directory.
+@router.get("/limits", response_model=UploadLimits)
+@require_permission("threads", "read", owner_check=True)
+async def get_upload_limits(
+    thread_id: str,
+    request: Request,
+    config: AppConfig = Depends(get_config),
+) -> UploadLimits:
+    """Return upload limits used by the gateway for this thread."""
+    return _get_upload_limits(config)
 
-    Args:
-        thread_id: The thread ID to list files for.
 
-    Returns:
-        Dictionary containing list of files with their metadata.
-    """
-    uploads_dir = get_uploads_dir(thread_id)
+@router.get("/list", response_model=UploadListResponse)
+@require_permission("threads", "read", owner_check=True)
+async def list_uploaded_files(thread_id: str, request: Request) -> UploadListResponse:
+    """List all files in a thread's uploads directory."""
+    try:
+        uploads_dir = get_uploads_dir(thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    result = list_files_in_dir(uploads_dir)
+    enrich_file_listing(result, thread_id)
 
-    if not uploads_dir.exists():
-        return {"files": [], "count": 0}
+    # Gateway additionally includes the sandbox-relative path.
+    sandbox_uploads = get_paths().sandbox_uploads_dir(thread_id, user_id=get_effective_user_id())
+    for f in result["files"]:
+        f["path"] = str(sandbox_uploads / f["filename"])
 
-    files = []
-    for file_path in sorted(uploads_dir.iterdir()):
-        if file_path.is_file():
-            stat = file_path.stat()
-            relative_path = str(get_paths().sandbox_uploads_dir(thread_id) / file_path.name)
-            files.append(
-                {
-                    "filename": file_path.name,
-                    "size": stat.st_size,
-                    "path": relative_path,  # Actual filesystem path
-                    "virtual_path": f"{VIRTUAL_PATH_PREFIX}/uploads/{file_path.name}",  # Path for Agent in sandbox
-                    "artifact_url": f"/api/threads/{thread_id}/artifacts/mnt/user-data/uploads/{file_path.name}",  # HTTP URL
-                    "extension": file_path.suffix,
-                    "modified": stat.st_mtime,
-                }
-            )
-
-    return {"files": files, "count": len(files)}
+    return UploadListResponse(**result)
 
 
 @router.delete("/{filename}")
-async def delete_uploaded_file(thread_id: str, filename: str) -> dict:
-    """Delete a file from a thread's uploads directory.
-
-    Args:
-        thread_id: The thread ID.
-        filename: The filename to delete.
-
-    Returns:
-        Success message.
-    """
-    uploads_dir = get_uploads_dir(thread_id)
-    file_path = uploads_dir / filename
-
-    if not file_path.exists():
+@require_permission("threads", "delete", owner_check=True, require_existing=True)
+async def delete_uploaded_file(thread_id: str, filename: str, request: Request) -> dict:
+    """Delete a file from a thread's uploads directory."""
+    try:
+        uploads_dir = get_uploads_dir(thread_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
+        return delete_file_safe(uploads_dir, filename, convertible_extensions=CONVERTIBLE_EXTENSIONS)
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
-
-    # Security check: ensure the path is within the uploads directory
-    try:
-        file_path.resolve().relative_to(uploads_dir.resolve())
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    try:
-        if file_path.suffix.lower() in CONVERTIBLE_EXTENSIONS:
-            companion_markdown = file_path.with_suffix(".md")
-            companion_markdown.unlink(missing_ok=True)
-        file_path.unlink(missing_ok=True)
-        logger.info(f"Deleted file: {filename}")
-        return {"success": True, "message": f"Deleted {filename}"}
+    except PathTraversalError:
+        raise HTTPException(status_code=400, detail="Invalid path")
     except Exception as e:
         logger.error(f"Failed to delete {filename}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete {filename}: {str(e)}")

@@ -1,8 +1,13 @@
 """Prompt templates for memory update and injection."""
 
+from __future__ import annotations
+
+import logging
 import math
 import re
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 try:
     import tiktoken
@@ -28,6 +33,17 @@ Instructions:
 1. Analyze the conversation for important information about the user
 2. Extract relevant facts, preferences, and context with specific details (numbers, names, technologies)
 3. Update the memory sections as needed following the detailed length guidelines below
+
+Before extracting facts, perform a structured reflection on the conversation:
+1. Error/Retry Detection: Did the agent encounter errors, require retries, or produce incorrect results?
+   If yes, record the root cause and correct approach as a high-confidence fact with category "correction".
+2. User Correction Detection: Did the user correct the agent's direction, understanding, or output?
+   If yes, record the correct interpretation or approach as a high-confidence fact with category "correction".
+   Include what went wrong in "sourceError" only when category is "correction" and the mistake is explicit in the conversation.
+3. Project Constraint Discovery: Were any project-specific constraints discovered during the conversation?
+   If yes, record them as facts with the most appropriate category and confidence.
+
+{correction_hint}
 
 Memory Section Guidelines:
 
@@ -62,6 +78,7 @@ Memory Section Guidelines:
   * context: Background facts (job title, projects, locations, languages)
   * behavior: Working patterns, communication habits, problem-solving approaches
   * goal: Stated objectives, learning targets, project ambitions
+  * correction: Explicit agent mistakes or user corrections, including the correct approach
 - Confidence levels:
   * 0.9-1.0: Explicitly stated facts ("I work on X", "My role is Y")
   * 0.7-0.8: Strongly implied from actions/discussions
@@ -94,7 +111,7 @@ Output Format (JSON):
     "longTermBackground": {{ "summary": "...", "shouldUpdate": true/false }}
   }},
   "newFacts": [
-    {{ "content": "...", "category": "preference|knowledge|context|behavior|goal", "confidence": 0.0-1.0 }}
+    {{ "content": "...", "category": "preference|knowledge|context|behavior|goal|correction", "confidence": 0.0-1.0 }}
   ],
   "factsToRemove": ["fact_id_1", "fact_id_2"]
 }}
@@ -104,6 +121,8 @@ Important Rules:
 - Follow length guidelines: workContext/personalContext are concise (1-3 sentences), topOfMind and history sections are detailed (paragraphs)
 - Include specific metrics, version numbers, and proper nouns in facts
 - Only add facts that are clearly stated (0.9+) or strongly implied (0.7+)
+- Use category "correction" for explicit agent mistakes or user corrections; assign confidence >= 0.95 when the correction is explicit
+- Include "sourceError" only for explicit correction facts when the prior mistake or wrong approach is clearly stated; omit it otherwise
 - Remove facts that are contradicted by new information
 - When updating topOfMind, integrate new focus areas while removing completed/abandoned ones
   Keep 3-5 concurrent focus themes that are still active and relevant
@@ -126,7 +145,7 @@ Message:
 Extract facts in this JSON format:
 {{
   "facts": [
-    {{ "content": "...", "category": "preference|knowledge|context|behavior|goal", "confidence": 0.0-1.0 }}
+    {{ "content": "...", "category": "preference|knowledge|context|behavior|goal|correction", "confidence": 0.0-1.0 }}
   ]
 }}
 
@@ -136,6 +155,7 @@ Categories:
 - context: Background context (location, job, projects)
 - behavior: Behavioral patterns
 - goal: User's goals or objectives
+- correction: Explicit corrections or mistakes to avoid repeating
 
 Rules:
 - Only extract clear, specific facts
@@ -143,6 +163,39 @@ Rules:
 - Skip vague or temporary information
 
 Return ONLY valid JSON."""
+
+
+# Module-level tiktoken encoding cache.  Populated lazily on first use;
+# subsequent calls are a dict lookup (no network I/O).  Pre-warming at
+# startup via :func:`warm_tiktoken_cache` avoids blocking a request on the
+# (potentially slow) first ``get_encoding`` call.
+_tiktoken_encoding_cache: dict[str, tiktoken.Encoding] = {}
+
+
+def _get_tiktoken_encoding(encoding_name: str = "cl100k_base") -> tiktoken.Encoding | None:
+    """Return a cached tiktoken encoding, or ``None`` on failure / unavailability.
+
+    On the very first call for a given *encoding_name*, tiktoken may need to
+    download the BPE data from ``openaipublic.blob.core.windows.net``.  In
+    network-restricted environments (e.g. deployments behind the GFW) this
+    download can block for tens of minutes before the OS TCP timeout kicks in.
+    The caller must therefore be prepared for this to block and should run it
+    off the event loop (e.g. via ``asyncio.to_thread``).
+    """
+    if not TIKTOKEN_AVAILABLE:
+        return None
+
+    cached = _tiktoken_encoding_cache.get(encoding_name)
+    if cached is not None:
+        return cached
+
+    try:
+        encoding = tiktoken.get_encoding(encoding_name)
+        _tiktoken_encoding_cache[encoding_name] = encoding
+        return encoding
+    except Exception:
+        logger.warning("Failed to load tiktoken encoding %r; falling back to char-based estimation", encoding_name, exc_info=True)
+        return None
 
 
 def _count_tokens(text: str, encoding_name: str = "cl100k_base") -> int:
@@ -155,16 +208,28 @@ def _count_tokens(text: str, encoding_name: str = "cl100k_base") -> int:
     Returns:
         The number of tokens in the text.
     """
-    if not TIKTOKEN_AVAILABLE:
+    encoding = _get_tiktoken_encoding(encoding_name)
+    if encoding is None:
         # Fallback to character-based estimation if tiktoken is not available
+        # or the encoding failed to load.
         return len(text) // 4
 
     try:
-        encoding = tiktoken.get_encoding(encoding_name)
         return len(encoding.encode(text))
     except Exception:
         # Fallback to character-based estimation on error
         return len(text) // 4
+
+
+def warm_tiktoken_cache() -> bool:
+    """Pre-warm the tiktoken encoding cache.
+
+    Call at startup (off the event loop) so the first request never blocks
+    on the BPE download.  Returns ``True`` if the encoding was loaded
+    successfully (or was already cached), ``False`` if tiktoken is
+    unavailable or the download failed.
+    """
+    return _get_tiktoken_encoding("cl100k_base") is not None
 
 
 def _coerce_confidence(value: Any, default: float = 0.0) -> float:
@@ -231,6 +296,10 @@ def format_memory_for_injection(memory_data: dict[str, Any], max_tokens: int = 2
         if earlier.get("summary"):
             history_sections.append(f"Earlier: {earlier['summary']}")
 
+        background = history_data.get("longTermBackground", {})
+        if background.get("summary"):
+            history_sections.append(f"Background: {background['summary']}")
+
         if history_sections:
             sections.append("History:\n" + "\n".join(f"- {s}" for s in history_sections))
 
@@ -238,13 +307,7 @@ def format_memory_for_injection(memory_data: dict[str, Any], max_tokens: int = 2
     facts_data = memory_data.get("facts", [])
     if isinstance(facts_data, list) and facts_data:
         ranked_facts = sorted(
-            (
-                f
-                for f in facts_data
-                if isinstance(f, dict)
-                and isinstance(f.get("content"), str)
-                and f.get("content").strip()
-            ),
+            (f for f in facts_data if isinstance(f, dict) and isinstance(f.get("content"), str) and f.get("content").strip()),
             key=lambda fact: _coerce_confidence(fact.get("confidence"), default=0.0),
             reverse=True,
         )
@@ -268,7 +331,11 @@ def format_memory_for_injection(memory_data: dict[str, Any], max_tokens: int = 2
                 continue
             category = str(fact.get("category", "context")).strip() or "context"
             confidence = _coerce_confidence(fact.get("confidence"), default=0.0)
-            line = f"- [{category} | {confidence:.2f}] {content}"
+            source_error = fact.get("sourceError")
+            if category == "correction" and isinstance(source_error, str) and source_error.strip():
+                line = f"- [{category} | {confidence:.2f}] {content} (avoid: {source_error.strip()})"
+            else:
+                line = f"- [{category} | {confidence:.2f}] {content}"
 
             # Each additional line is preceded by a newline (except the first).
             line_text = ("\n" + line) if fact_lines else line
