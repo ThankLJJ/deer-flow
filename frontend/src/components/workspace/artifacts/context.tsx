@@ -2,6 +2,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
@@ -60,25 +61,43 @@ export function ArtifactsProvider({ children }: ArtifactsProviderProps) {
     setOpen(false);
   }, []);
 
-  const value: ArtifactsContextType = {
-    artifacts,
-    setArtifacts,
-
-    open,
-    autoOpen,
-    autoSelect,
-    setOpen: (isOpen: boolean) => {
+  const setOpenWithAutoReset = useCallback(
+    (isOpen: boolean) => {
       if (!isOpen && autoOpen) {
         setAutoOpen(false);
         setAutoSelect(false);
       }
       setOpen(isOpen);
     },
+    [autoOpen],
+  );
 
-    selectedArtifact,
-    select,
-    deselect,
-  };
+  const value: ArtifactsContextType = useMemo(
+    () => ({
+      artifacts,
+      setArtifacts,
+
+      open,
+      autoOpen,
+      autoSelect,
+      setOpen: setOpenWithAutoReset,
+
+      selectedArtifact,
+      select,
+      deselect,
+    }),
+    [
+      artifacts,
+      setArtifacts,
+      open,
+      autoOpen,
+      autoSelect,
+      setOpenWithAutoReset,
+      selectedArtifact,
+      select,
+      deselect,
+    ],
+  );
 
   return (
     <ArtifactsContext.Provider value={value}>

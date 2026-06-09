@@ -14,7 +14,7 @@ export function SkillsSection({ className }: { className?: string }) {
         <div>
           智能体技能按需加载 —— 只在需要时加载所需内容。
           <br />
-          使用您自己的技能文件扩展 DeerFlow，或使用内置技能库。
+          使用您自己的技能文件扩展 DataAgent，或使用内置技能库。
         </div>
       }
     >

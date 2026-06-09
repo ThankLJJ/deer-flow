@@ -15,7 +15,7 @@ export function SandboxSection({ className }: { className?: string }) {
       title="智能体运行环境"
       subtitle={
         <p>
-          我们为 DeerFlow 提供了一台"电脑"，可以执行命令、管理文件、运行长时间任务 —— 全部在安全的 Docker 沙箱中
+          我们为 DataAgent 提供了一台"电脑"，可以执行命令、管理文件、运行长时间任务 —— 全部在安全的 Docker 沙箱中
         </p>
       }
     >

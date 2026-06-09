@@ -16,7 +16,7 @@ export function CommunitySection() {
           加入社区
         </AuroraText>
       }
-      subtitle="贡献精彩想法，共同塑造 DeerFlow 的未来。协作、创新、产生影响。"
+      subtitle="贡献精彩想法，共同塑造 DataAgent 的未来。协作、创新、产生影响。"
     >
       <div className="flex justify-center">
         <Button className="text-xl" size="lg" asChild>

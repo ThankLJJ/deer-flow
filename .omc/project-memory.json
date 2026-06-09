@@ -1,0 +1,145 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1780925880334,
+  "projectRoot": "/Users/l/Projects/deerflow2.0-enhanced",
+  "techStack": {
+    "languages": [
+      {
+        "name": "C/C++",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Makefile"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "make build",
+    "testCommand": "make test",
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "scripts"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "backend": {
+      "path": "backend",
+      "purpose": null,
+      "fileCount": 13,
+      "lastAccessed": 1780925880195,
+      "keyFiles": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CONTRIBUTING.md",
+        "Dockerfile",
+        "Makefile"
+      ]
+    },
+    "docker": {
+      "path": "docker",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1780925880196,
+      "keyFiles": [
+        "docker-compose-dev.yaml",
+        "docker-compose.yaml"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 2,
+      "lastAccessed": 1780925880196,
+      "keyFiles": [
+        "CODE_CHANGE_SUMMARY_BY_FILE.md",
+        "SKILL_NAME_CONFLICT_FIX.md"
+      ]
+    },
+    "frontend": {
+      "path": "frontend",
+      "purpose": null,
+      "fileCount": 21,
+      "lastAccessed": 1780925880197,
+      "keyFiles": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "Dockerfile",
+        "Makefile",
+        "README.md"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 12,
+      "lastAccessed": 1780925880197,
+      "keyFiles": [
+        "check.py",
+        "check.sh",
+        "cleanup-containers.sh",
+        "config-upgrade.sh",
+        "configure.py"
+      ]
+    },
+    "skills": {
+      "path": "skills",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1780925880198,
+      "keyFiles": []
+    },
+    "backend/app": {
+      "path": "backend/app",
+      "purpose": "Application code",
+      "fileCount": 1,
+      "lastAccessed": 1780925880331,
+      "keyFiles": [
+        "__init__.py"
+      ]
+    },
+    "skills/public": {
+      "path": "skills/public",
+      "purpose": "Public files",
+      "fileCount": 0,
+      "lastAccessed": 1780925880333,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "frontend/src/components/workspace/messages/subtask-card.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1780925924338,
+      "type": "file"
+    },
+    {
+      "path": "frontend/src/core/tasks/context.tsx",
+      "accessCount": 1,
+      "lastAccessed": 1780925912257,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

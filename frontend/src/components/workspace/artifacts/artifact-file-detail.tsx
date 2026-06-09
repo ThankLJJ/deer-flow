@@ -43,6 +43,7 @@ import { useThread } from "../messages/context";
 import { Tooltip } from "../tooltip";
 
 import { useArtifacts } from "./context";
+import { FilePreview, getFilePreviewType } from "./file-previews";
 
 export function ArtifactFileDetail({
   className,
@@ -250,12 +251,14 @@ export function ArtifactFileDetail({
             readonly
           />
         )}
-        {!isCodeFile && (
-          <iframe
-            className="size-full"
-            src={urlOfArtifact({ filepath, threadId, isMock })}
-          />
-        )}
+        {!isCodeFile && (() => {
+          const previewType = getFilePreviewType(filepath);
+          const artifactUrl = urlOfArtifact({ filepath, threadId, isMock });
+          if (previewType) {
+            return <FilePreview filepath={filepath} url={artifactUrl} />;
+          }
+          return <iframe className="size-full" src={artifactUrl} />;
+        })()}
       </ArtifactContent>
     </Artifact>
   );

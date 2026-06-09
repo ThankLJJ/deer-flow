@@ -54,7 +54,7 @@ export function Hero({ className }: { className?: string }) {
               "学习知识",
             ]}
           />{" "}
-          <div>用 DeerFlow</div>
+          <div>用 DataAgent</div>
         </h1>
         <p
           className="mt-8 scale-105 text-center text-2xl text-shadow-sm"

@@ -1,4 +1,11 @@
-import { createContext, useCallback, useContext, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import type { Subtask } from "./types";
 
@@ -16,6 +23,16 @@ export const SubtaskContext = createContext<SubtaskContextValue>({
 
 export function SubtasksProvider({ children }: { children: React.ReactNode }) {
   const [tasks, setTasks] = useState<Record<string, Subtask>>({});
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+
+  // Cleanup tasks on unmount
+  useEffect(() => {
+    return () => {
+      setTasks({});
+    };
+  }, []);
+
   return (
     <SubtaskContext.Provider value={{ tasks, setTasks }}>
       {children}
@@ -42,9 +59,10 @@ export function useUpdateSubtask() {
   const { tasks, setTasks } = useSubtaskContext();
   const updateSubtask = useCallback(
     (task: Partial<Subtask> & { id: string }) => {
-      tasks[task.id] = { ...tasks[task.id], ...task } as Subtask;
       if (task.latestMessage) {
-        setTasks({ ...tasks });
+        const updated = { ...tasks };
+        updated[task.id] = { ...tasks[task.id], ...task } as Subtask;
+        setTasks(updated);
       }
     },
     [tasks, setTasks],
