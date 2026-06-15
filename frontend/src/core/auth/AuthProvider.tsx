@@ -12,6 +12,7 @@ import React, {
 
 import { isStaticWebsiteOnly } from "../static-mode";
 
+import { isAuthDisabledMode } from "./auth-disabled-user";
 import { type User, buildLoginUrl } from "./types";
 
 // Re-export for consumers
@@ -68,6 +69,7 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
    */
   const refreshUser = useCallback(async () => {
     if (staticMode) return;
+    if (isAuthDisabledMode()) return;
 
     try {
       setIsLoading(true);
@@ -110,6 +112,11 @@ export function AuthProvider({ children, initialUser }: AuthProviderProps) {
     setUser(null);
 
     if (staticMode) {
+      router.push("/");
+      return;
+    }
+
+    if (isAuthDisabledMode()) {
       router.push("/");
       return;
     }
