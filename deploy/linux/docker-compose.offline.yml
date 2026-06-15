@@ -1,30 +1,22 @@
-# DeerFlow 前端 + sqlQuery backend Linux 部署
-# 启动：docker compose --env-file .env.docker up -d
-# 停止：docker compose down
-# 查看日志：docker compose logs -f
+# ============================================================
+# 离线部署专用 docker-compose（纯 image 模式，无需源码构建）
 #
-# 服务拓扑：
-#   nginx (80) → frontend (3000)
-#             → backend  (8001, FastAPI + deerflow_compat)
-#             → langgraph(2024, LangGraph Server)
+# 服务器上不需要 frontend 源码、node、pnpm —— 镜像已在开发机
+# 构建好并随 tar 包一起传过来，只需 docker load + up 即可。
 #
-# MySQL/Milvus/Embedding 等外部依赖由 .env.docker 中的地址决定，不在本 compose 内。
+# 唯一需要挂载的"源码"是 sqlQuery/backend（2MB 纯 Python），
+# 因为 LangGraph Server 启动时要读 langgraph.json + graph.py。
+#
+# 使用：
+#   docker compose -f docker-compose.offline.yml --env-file .env.docker up -d
+# ============================================================
 
 services:
-  # ───────────── 前端 ─────────────
+  # ───────────── 前端（Next.js standalone，已烘焙好配置）─────────────
   frontend:
-    build:
-      context: ../..
-      dockerfile: deploy/linux/frontend.Dockerfile
-      args:
-        # 受限网络可设 NPM_REGISTRY=https://registry.npmmirror.com
-        NPM_REGISTRY: ${NPM_REGISTRY:-}
-        # 生产构建必须的 Better Auth secret（任意非默认字符串）
-        BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-please-change-this-secret-in-env}
     image: deerflow-frontend:latest
     container_name: deerflow-frontend
     restart: unless-stopped
-    # 不直接暴露端口，由 nginx 反代
     expose:
       - "3000"
     environment:
@@ -35,33 +27,28 @@ services:
 
   # ───────────── FastAPI 辅助 API ─────────────
   backend:
-    # 复用 sqlQuery 项目已构建的镜像；如未构建，取消下面 build 注释自行构建
-    # build:
-    #   context: ${SQLQUERY_PATH:-../../Sdata/sqlQuery}
-    #   dockerfile: Dockerfile.backend
     image: ${SQLQUERY_BACKEND_IMAGE:-dataagent-backend:latest}
     container_name: deerflow-backend
     restart: unless-stopped
     env_file:
       - .env.docker
     environment:
-      # 覆盖 CORS — 同源访问，允许 nginx 反代过来的请求
+      # 同源访问，允许 nginx 反代过来的请求
       FRONTEND_URL: "*"
     volumes:
       # workspace 持久化（uploads、sandbox 生成的文件、artifacts）
       - ${WORKSPACE_DIR:-./data/workspace}:/app/workspace
-    expose:
-      - "8001"
     # 镜像默认 CMD 跑在 :80（Dockerfile.backend EXPOSE 80），
     # 这里显式覆盖到 :8001，与 nginx upstream backend:8001 对齐。
     # 注意：若删除此 command，容器会回到 :80，nginx 将连不上。
+    expose:
+      - "8001"
     command: ["python3", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8001"]
     networks:
       - deerflow-net
 
   # ───────────── LangGraph Server ─────────────
   langgraph:
-    # 官方 LangGraph API 镜像；它会读 /app/langgraph.json 启动
     image: langchain/langgraph-api:latest
     container_name: deerflow-langgraph
     restart: unless-stopped
@@ -73,11 +60,11 @@ services:
       # 允许同步 DB 驱动（PyMySQLSaver 是同步的）
       LANGGRAPH_ALLOW_BLOCKING: "1"
     volumes:
-      # 挂载整个 sqlQuery 项目（含 langgraph.json、backend/ 源码）
-      - ${SQLQUERY_PATH:-../../Sdata/sqlQuery}:/app
+      # 只挂载 sqlQuery 源码（含 langgraph.json、backend/、.env）
+      # 2MB 纯 Python，离线包里已带 sqlquery-src/
+      - ${SQLQUERY_PATH:-./sqlquery-src}:/app
     expose:
       - "2024"
-    # 容器内默认 8000，映射到内部 2024 端口（仅 docker network 内可访问）
     command: ["--host", "0.0.0.0", "--port", "2024", "--no-browser"]
     depends_on:
       - backend
@@ -86,9 +73,6 @@ services:
 
   # ───────────── 统一入口 nginx ─────────────
   nginx:
-    build:
-      context: ./nginx
-      dockerfile: Dockerfile
     image: deerflow-nginx:latest
     container_name: deerflow-nginx
     restart: unless-stopped
