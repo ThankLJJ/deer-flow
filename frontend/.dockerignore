@@ -1,0 +1,16 @@
+node_modules
+.next
+.env
+.env.local
+.env*.local
+.git
+.gitignore
+README.md
+DEPLOYMENT.md
+*.log
+.DS_Store
+.vscode
+.idea
+coverage
+playwright-report
+test-results
