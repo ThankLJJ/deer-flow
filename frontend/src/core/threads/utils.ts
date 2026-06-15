@@ -53,7 +53,18 @@ export function textOfMessage(message: Message) {
 }
 
 export function titleOfThread(thread: AgentThread) {
-  return thread.values?.title ?? "Untitled";
+  const values = thread.values;
+  if (values?.title && values.title.trim().length > 0) {
+    return values.title;
+  }
+  // Fallback: 从 messages 第一条 HumanMessage 提取内容
+  const firstHuman = values?.messages?.find((m) => m.type === "human");
+  const text = firstHuman ? textOfMessage(firstHuman) : null;
+  if (text && text.trim().length > 0) {
+    const trimmed = text.trim().replace(/\s+/g, " ");
+    return trimmed.length > 50 ? `${trimmed.slice(0, 50)}...` : trimmed;
+  }
+  return "Untitled";
 }
 
 const CHANNEL_PROVIDER_LABELS: Record<string, string> = {
