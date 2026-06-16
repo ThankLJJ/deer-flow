@@ -62,7 +62,7 @@ export const enUS: Translations = {
   welcome: {
     greeting: "Hello, again!",
     description:
-      "Welcome to 🦌 DataAgent, an open source super agent. With built-in and custom skills, DataAgent helps you search on the web, analyze data, and generate artifacts like slides, web pages and do almost anything.",
+      "Welcome to DataAgent, a data analysis agent platform. With built-in skills and tools, DataAgent helps you query data, analyze business metrics, and generate reports.",
 
     createYourOwnSkill: "Create Your Own Skill",
     createYourOwnSkillDescription:

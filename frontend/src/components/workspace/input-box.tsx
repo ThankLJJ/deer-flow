@@ -135,13 +135,14 @@ function getResolvedMode(
   mode: InputMode | undefined,
   supportsThinking: boolean,
 ): InputMode {
-  if (!supportsThinking && mode !== "flash") {
-    return "flash";
+  // 闪速模式已隐藏，默认使用 thinking 模式
+  if (!supportsThinking) {
+    return "thinking";
   }
-  if (mode) {
+  if (mode && mode !== "flash") {
     return mode;
   }
-  return supportsThinking ? "pro" : "flash";
+  return supportsThinking ? "pro" : "thinking";
 }
 
 export function InputBox({
@@ -706,6 +707,7 @@ export function InputBox({
             </PromptInputActionMenuContent>
           </PromptInputActionMenu> */}
             <AddAttachmentsButton className="px-2!" />
+            {/* 模式选择按钮已隐藏
             <PromptInputActionMenu>
               <ModeHoverGuide
                 mode={
@@ -877,6 +879,7 @@ export function InputBox({
                 </DropdownMenuGroup>
               </PromptInputActionMenuContent>
             </PromptInputActionMenu>
+            */}
             {supportReasoningEffort && context.mode !== "flash" && (
               <PromptInputActionMenu>
                 <PromptInputActionMenuTrigger className="gap-1! px-2!">
