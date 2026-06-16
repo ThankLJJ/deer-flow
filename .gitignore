@@ -55,6 +55,15 @@ web/
 # Deployment artifacts
 backend/Dockerfile.langgraph
 config.yaml.bak
+
+# Offline bundle build output (images, vendored src) — generated, not source
+deploy/linux/deerflow-offline-bundle/
+
+# Obsidian vault state (personal editor metadata, not project code)
+deploy/linux/.obsidian/
+
+# One-off helper script
+deploy/linux/_write_readme.py
 .playwright-mcp
 /frontend/test-results/
 /frontend/playwright-report/
