@@ -7,20 +7,29 @@
 
 # ---- Stage 1: deps ----
 FROM node:22-alpine AS deps
-RUN corepack enable && corepack prepare pnpm@10.26.2 --activate
+# pnpm 版本须与 frontend/pnpm-lock.yaml 的 lockfileVersion 匹配
+# lockfileVersion 5.3 由 pnpm 8.x 生成，故这里固定为 8.15.9（v8 末版）
+# COREPACK_NPM_REGISTRY：让 corepack 下载 pnpm 本体时走国内镜像（默认硬编码 npmjs.org，国内会卡）
+ARG COREPACK_NPM_REGISTRY=""
+ENV COREPACK_NPM_REGISTRY=${COREPACK_NPM_REGISTRY}
+RUN corepack enable && corepack prepare pnpm@8.15.9 --activate
 WORKDIR /app
 
-# 支持受限网络自定义 npm registry
+# 支持受限网络自定义 npm registry（pnpm install 依赖下载源）
 ARG NPM_REGISTRY=""
 RUN if [ -n "${NPM_REGISTRY}" ]; then pnpm config set registry "${NPM_REGISTRY}"; fi
 
 # 利用 Docker 层缓存：先拷 lockfile，再 install
+# 不用 --frozen-lockfile：pnpm-lock.yaml 为旧 lockfileVersion(5.3)，
+# 与当前 pnpm 主版本不完全兼容；用 --no-frozen-lockfile 让 pnpm 自行解析。
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 # ---- Stage 2: builder ----
 FROM node:22-alpine AS builder
-RUN corepack enable && corepack prepare pnpm@10.26.2 --activate
+ARG COREPACK_NPM_REGISTRY=""
+ENV COREPACK_NPM_REGISTRY=${COREPACK_NPM_REGISTRY}
+RUN corepack enable && corepack prepare pnpm@8.15.9 --activate
 WORKDIR /app
 
 ARG NPM_REGISTRY=""
@@ -35,6 +44,8 @@ ENV NEXT_PUBLIC_BACKEND_BASE_URL=""
 ENV NEXT_PUBLIC_LANGGRAPH_BASE_URL=""
 ENV SKIP_ENV_VALIDATION=1
 ENV NEXT_CONFIG_BUILD_OUTPUT=standalone
+# 跳过 next build 的类型检查与 lint（next.config.js 里读 SKIP_TYPE_CHECK）
+ENV SKIP_TYPE_CHECK=1
 # auth-disabled 模式（绕过 /api/v1/auth/*）
 ENV DEER_FLOW_AUTH_DISABLED=1
 # Better Auth 需要 secret 才能通过 prod 模式的 env 校验

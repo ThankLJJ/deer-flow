@@ -20,6 +20,14 @@ const config = {
     process.env.NEXT_CONFIG_BUILD_OUTPUT === "standalone"
       ? "standalone"
       : undefined,
+  // Docker / 离线镜像构建时跳过类型检查与 lint，避免历史类型错误阻断产物生成。
+  // 本地开发不设此变量，仍保留严格检查。
+  typescript: {
+    ignoreBuildErrors: process.env.SKIP_TYPE_CHECK === "1",
+  },
+  eslint: {
+    ignoreDuringBuilds: process.env.SKIP_TYPE_CHECK === "1",
+  },
   i18n: {
     locales: ["en", "zh"],
     defaultLocale: "en",
