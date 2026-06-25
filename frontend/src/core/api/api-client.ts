@@ -142,9 +142,11 @@ function createStaticClient(): LangGraphClient {
     return [staticDemoThreadState(await loadStaticDemoThread(threadId))];
   }) as typeof client.threads.getHistory;
 
+  // update 是多重载签名（部分重载返回 void，部分返回 Thread），
+  // 单一返回类型无法满足所有重载，按 TS 建议用双重断言绕过。
   client.threads.update = (async (threadId) => {
-    return loadStaticDemoThread(threadId);
-  }) as typeof client.threads.update;
+    await loadStaticDemoThread(threadId);
+  }) as unknown as typeof client.threads.update;
 
   client.runs.list = (async () => []) as typeof client.runs.list;
   client.runs.stream = async function* () {

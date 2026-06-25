@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { useI18n } from "@/core/i18n/hooks";
 import { cn } from "@/lib/utils";
@@ -34,8 +34,9 @@ export function Welcome({
     }
     return ["var(--color-foreground)"];
   }, [isUltra]);
+  const wavedRef = useRef(false);
   useEffect(() => {
-    waved = true;
+    wavedRef.current = true;
   }, []);
   return (
     <div

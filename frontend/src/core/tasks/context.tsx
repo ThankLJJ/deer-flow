@@ -27,6 +27,16 @@ export const SubtaskContext = createContext<SubtaskContextValue>({
 
 export function SubtasksProvider({ children }: { children: React.ReactNode }) {
   const [tasks, setTasks] = useState<Record<string, Subtask>>({});
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+
+  // Cleanup tasks on unmount
+  useEffect(() => {
+    return () => {
+      setTasks({});
+    };
+  }, []);
+
   return (
     <SubtaskContext.Provider value={{ tasks, setTasks }}>
       {children}

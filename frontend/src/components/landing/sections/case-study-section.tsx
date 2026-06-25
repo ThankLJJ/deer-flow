@@ -10,46 +10,40 @@ export function CaseStudySection({ className }: { className?: string }) {
   const caseStudies = [
     {
       threadId: "7cfa5f8f-a2f8-47ad-acbd-da7137baf990",
-      title: "Forecast 2026 Agent Trends and Opportunities",
-      description:
-        "Create a webpage with a Deep Research report forecasting the agent technology trends and opportunities in 2026.",
+      title: "2026年智能体趋势与机遇预测",
+      description: "创建深度研究报告网页，预测2026年智能体技术趋势和机遇。",
     },
     {
       threadId: "4f3e55ee-f853-43db-bfb3-7d1a411f03cb",
-      title: 'Generate a Video Based On the Novel "Pride and Prejudice"',
-      description:
-        'Search the specific scene from the novel "Pride and Prejudice", then generate a video as well as a reference image based on the scenes.',
+      title: "基于《傲慢与偏见》生成视频",
+      description: "搜索小说《傲慢与偏见》中的特定场景，然后根据场景生成视频和参考图片。",
     },
     {
       threadId: "21cfea46-34bd-4aa6-9e1f-3009452fbeb9",
-      title: "Doraemon Explains the MOE Architecture",
-      description:
-        "Generate a Doraemon comic strip explaining the MOE architecture to the teenagers who are interested in AI.",
+      title: "哆啦A梦解释MOE架构",
+      description: "生成哆啦A梦漫画，向对AI感兴趣的青少年解释MOE架构。",
     },
     {
       threadId: "ad76c455-5bf9-4335-8517-fc03834ab828",
-      title: "An Exploratory Data Analysis of the Titanic Dataset",
-      description:
-        "Explore the Titanic dataset and identify the key factors that influenced survival rates with visualizations and insights.",
+      title: "泰坦尼克号数据集探索性分析",
+      description: "探索泰坦尼克号数据集，识别影响生存率的关键因素并生成可视化图表。",
     },
     {
       threadId: "d3e5adaf-084c-4dd5-9d29-94f1d6bccd98",
-      title: "Watch Y Combinator's Video then Conduct a Deep Research",
-      description:
-        "Watch the given Y Combinator's YouTube video and conduct a deep research on the YC's tips for technical startup founders.",
+      title: "观看Y Combinator视频并进行深度研究",
+      description: "观看指定的Y Combinator视频，对YC给技术创业者的建议进行深度研究。",
     },
     {
       threadId: "3823e443-4e2b-4679-b496-a9506eae462b",
-      title: "Collect and Summarize Dr. Fei Fei Li's Podcasts",
-      description:
-        "Collect all the podcast appearances of Dr. Fei Fei Li in the last 6 months, then summarize them into a comprehensive report.",
+      title: "收集并总结李飞飞博士的播客",
+      description: "收集李飞飞博士过去6个月的所有播客出演，并整理成综合报告。",
     },
   ];
   return (
     <Section
       className={className}
-      title="Case Studies"
-      subtitle="See how DeerFlow is used in the wild"
+      title="案例展示"
+      subtitle="看看 DataAgent 是如何被使用的"
     >
       <div className="container-md mt-8 grid grid-cols-1 gap-4 px-4 md:grid-cols-2 md:px-20 lg:grid-cols-3">
         {caseStudies.map((caseStudy) => (

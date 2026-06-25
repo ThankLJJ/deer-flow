@@ -10,7 +10,19 @@ const SUPPORTED_RUN_STREAM_MODES = new Set([
   "custom",
 ] as const);
 
+const MAX_WARNED_MODES = 50;
+
 const warnedUnsupportedStreamModes = new Set<string>();
+
+function trimWarnedSet() {
+  if (warnedUnsupportedStreamModes.size > MAX_WARNED_MODES) {
+    const iter = warnedUnsupportedStreamModes.values();
+    const excess = warnedUnsupportedStreamModes.size - MAX_WARNED_MODES;
+    for (let i = 0; i < excess; i++) {
+      warnedUnsupportedStreamModes.delete(iter.next().value!);
+    }
+  }
+}
 
 export function warnUnsupportedStreamModes(
   modes: string[],
@@ -24,12 +36,14 @@ export function warnUnsupportedStreamModes(
     return true;
   });
 
+  trimWarnedSet();
+
   if (unseenModes.length === 0) {
     return;
   }
 
   warn(
-    `[deer-flow] Dropped unsupported LangGraph stream mode(s): ${unseenModes.join(", ")}`,
+    `[dataagent] Dropped unsupported LangGraph stream mode(s): ${unseenModes.join(", ")}`,
   );
 }
 

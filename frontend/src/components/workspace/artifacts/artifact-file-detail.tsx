@@ -59,6 +59,7 @@ import { useThread } from "../messages/context";
 import { Tooltip } from "../tooltip";
 
 import { useArtifacts } from "./context";
+import { FilePreview, getFilePreviewType } from "./file-previews";
 
 const WRITE_FILE_PREVIEW_REFRESH_INTERVAL_MS = 3000;
 
@@ -313,19 +314,14 @@ export function ArtifactFileDetail({
             readonly
           />
         )}
-        {!isCodeFile && canPreviewInBrowser && (
-          <iframe
-            className="size-full"
-            src={urlOfArtifact({ filepath, threadId, isMock })}
-          />
-        )}
-        {!isCodeFile && !canPreviewInBrowser && (
-          <ArtifactDownloadFallback
-            filepath={filepath}
-            threadId={threadId}
-            isMock={isMock}
-          />
-        )}
+        {!isCodeFile && (() => {
+          const previewType = getFilePreviewType(filepath);
+          const artifactUrl = urlOfArtifact({ filepath, threadId, isMock });
+          if (previewType) {
+            return <FilePreview filepath={filepath} url={artifactUrl} />;
+          }
+          return <iframe className="size-full" src={artifactUrl} />;
+        })()}
       </ArtifactContent>
     </Artifact>
   );

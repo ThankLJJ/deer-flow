@@ -1,5 +1,5 @@
 import { CheckIcon, CopyIcon } from "lucide-react";
-import { useCallback, useState, type ComponentProps } from "react";
+import { useCallback, useRef, useState, type ComponentProps } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ export function CopyButton({
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
   const handleCopy = useCallback(() => {
     void (async () => {
       const didCopy = await writeTextToClipboard(clipboardData);

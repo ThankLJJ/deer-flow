@@ -1,3 +1,4 @@
+import { isAuthDisabledMode } from "@/core/auth/auth-disabled-user";
 import { buildLoginUrl } from "@/core/auth/types";
 
 /** HTTP methods that the gateway's CSRFMiddleware checks. */
@@ -81,7 +82,9 @@ export async function fetch(
   });
 
   if (res.status === 401) {
-    window.location.href = buildLoginUrl(window.location.pathname);
+    if (!isAuthDisabledMode()) {
+      window.location.href = buildLoginUrl(window.location.pathname);
+    }
     throw new Error("Unauthorized");
   }
 

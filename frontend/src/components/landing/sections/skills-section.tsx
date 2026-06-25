@@ -9,14 +9,12 @@ export function SkillsSection({ className }: { className?: string }) {
   return (
     <Section
       className={cn("h-[calc(100vh-64px)] w-full bg-white/2", className)}
-      title="Agent Skills"
+      title="智能体技能"
       subtitle={
         <div>
-          Agent Skills are loaded progressively — only what&apos;s needed, when
-          it&apos;s needed.
+          智能体技能按需加载 —— 只在需要时加载所需内容。
           <br />
-          Extend DeerFlow with your own skill files, or use our built-in
-          library.
+          使用您自己的技能文件扩展 DataAgent，或使用内置技能库。
         </div>
       }
     >

@@ -40,22 +40,22 @@ export function Hero({ className }: { className?: string }) {
         <h1 className="flex items-center gap-2 text-4xl font-bold md:text-6xl">
           <WordRotate
             words={[
-              "Deep Research",
-              "Collect Data",
-              "Analyze Data",
-              "Generate Webpages",
-              "Vibe Coding",
-              "Generate Slides",
-              "Generate Images",
-              "Generate Podcasts",
-              "Generate Videos",
-              "Generate Songs",
-              "Organize Emails",
-              "Do Anything",
-              "Learn Anything",
+              "深度调研",
+              "数据采集",
+              "数据分析",
+              "生成网页",
+              "代码开发",
+              "生成幻灯片",
+              "生成图片",
+              "生成播客",
+              "生成视频",
+              "生成音乐",
+              "邮件整理",
+              "处理任务",
+              "学习知识",
             ]}
           />{" "}
-          <div>with DeerFlow</div>
+          <div>用 DataAgent</div>
         </h1>
         {env.NEXT_PUBLIC_STATIC_WEBSITE_ONLY && (
           <a
@@ -73,14 +73,13 @@ export function Hero({ className }: { className?: string }) {
           An open-source SuperAgent harness that researches, codes, and creates.
           With
           <br />
-          the help of sandboxes, memories, tools, skills and subagents, it
-          handles
+          借助沙箱、记忆、工具、技能和子代理，
           <br />
-          different levels of tasks that could take minutes to hours.
+          处理从分钟到小时级别的各类复杂任务。
         </p>
         <Link href="/workspace">
           <Button className="size-lg mt-8 scale-108" size="lg">
-            <span className="text-md">Get Started with 2.0</span>
+            <span className="text-md">开始使用 2.0</span>
             <ChevronRightIcon className="size-4" />
           </Button>
         </Link>

@@ -12,12 +12,10 @@ export function SandboxSection({ className }: { className?: string }) {
   return (
     <Section
       className={className}
-      title="Agent Runtime Environment"
+      title="智能体运行环境"
       subtitle={
         <p>
-          We give DeerFlow a &quot;computer&quot;, which can execute commands,
-          manage files, and run long tasks — all in a secure Docker-based
-          sandbox
+          我们为 DataAgent 提供了一台"电脑"，可以执行命令、管理文件、运行长时间任务 —— 全部在安全的 Docker 沙箱中
         </p>
       }
     >
@@ -35,27 +33,27 @@ export function SandboxSection({ className }: { className?: string }) {
               $ pip install -r requirements.txt
             </TypingAnimation>
             <AnimatedSpan delay={2000} className="text-green-500">
-              ✔ Installed pygame
+              ✔ 已安装 pygame
             </AnimatedSpan>
 
             <TypingAnimation delay={2400}>
               $ write game.py --lines 156
             </TypingAnimation>
             <AnimatedSpan delay={3200} className="text-blue-500">
-              ✔ Written 156 lines
+              ✔ 已写入 156 行
             </AnimatedSpan>
 
             <TypingAnimation delay={3600}>
               $ python game.py --test
             </TypingAnimation>
             <AnimatedSpan delay={4200} className="text-green-500">
-              ✔ All sprites loaded
+              ✔ 所有精灵已加载
             </AnimatedSpan>
             <AnimatedSpan delay={4500} className="text-green-500">
-              ✔ Physics engine OK
+              ✔ 物理引擎正常
             </AnimatedSpan>
             <AnimatedSpan delay={4800} className="text-green-500">
-              ✔ 60 FPS stable
+              ✔ 60 FPS 稳定
             </AnimatedSpan>
 
             {/* Scene 2: Data Analysis */}
@@ -63,7 +61,7 @@ export function SandboxSection({ className }: { className?: string }) {
               $ curl -O sales-2024.csv
             </TypingAnimation>
             <AnimatedSpan delay={6200} className="text-zinc-400">
-              Downloaded 12.4 MB
+              已下载 12.4 MB
             </AnimatedSpan>
           </Terminal>
         </div>
@@ -72,7 +70,7 @@ export function SandboxSection({ className }: { className?: string }) {
         <div className="w-full flex-1 space-y-6">
           <div className="space-y-4">
             <p className="text-sm font-medium tracking-wider text-purple-400 uppercase">
-              Open-source
+              开源
             </p>
             <h2 className="text-4xl font-bold tracking-tight lg:text-5xl">
               <a
@@ -80,14 +78,14 @@ export function SandboxSection({ className }: { className?: string }) {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                AIO Sandbox
+                AIO 沙箱
               </a>
             </h2>
           </div>
 
           <div className="space-y-4 text-lg text-zinc-400">
             <p>
-              We recommend using{" "}
+              我们推荐使用{" "}
               <a
                 href="https://github.com/agent-infra/sandbox"
                 className="underline"
@@ -96,27 +94,26 @@ export function SandboxSection({ className }: { className?: string }) {
               >
                 All-in-One Sandbox
               </a>{" "}
-              that combines Browser, Shell, File, MCP and VSCode Server in a
-              single Docker container.
+              —— 将浏览器、Shell、文件系统、MCP 和 VSCode Server 整合在单个 Docker 容器中。
             </p>
           </div>
 
           {/* Feature Tags */}
           <div className="flex flex-wrap gap-3 pt-4">
             <span className="rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-300">
-              Isolated
+              隔离环境
             </span>
             <span className="rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-300">
-              Safe
+              安全可靠
             </span>
             <span className="rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-300">
-              Persistent
+              持久化
             </span>
             <span className="rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-300">
-              Mountable FS
+              可挂载文件系统
             </span>
             <span className="rounded-full border border-zinc-800 bg-zinc-900 px-4 py-2 text-sm text-zinc-300">
-              Long-running
+              长时间运行
             </span>
           </div>
         </div>

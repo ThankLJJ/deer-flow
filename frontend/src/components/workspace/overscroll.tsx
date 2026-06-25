@@ -12,6 +12,10 @@ export function Overscroll({
   useEffect(() => {
     document.documentElement.style.overflow = overflow;
     document.documentElement.style.overscrollBehavior = behavior;
+    return () => {
+      document.documentElement.style.overflow = "";
+      document.documentElement.style.overscrollBehavior = "";
+    };
   }, [behavior, overflow]);
   return null;
 }

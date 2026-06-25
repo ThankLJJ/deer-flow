@@ -1,0 +1,75 @@
+# ============================================================
+# 离线部署专用 docker-compose（纯 image 模式，无需源码构建）
+#
+# 服务器上不需要 frontend 源码、node、pnpm —— 镜像已在开发机
+# 构建好并随 tar 包一起传过来，只需 docker load + up 即可。
+#
+# 唯一需要挂载的"源码"是 sqlQuery/backend（2MB 纯 Python），
+# 因为 LangGraph Server 启动时要读 langgraph.json + graph.py。
+#
+# 使用：
+#   docker compose -f docker-compose.offline.yml --env-file .env.docker up -d
+# ============================================================
+
+services:
+  # ───────────── 前端（Next.js standalone，已烘焙好配置）─────────────
+  frontend:
+    image: deerflow-frontend:latest
+    container_name: deerflow-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      DEER_FLOW_AUTH_DISABLED: "1"
+    networks:
+      - deerflow-net
+
+  # ───────────── FastAPI 辅助 API ─────────────
+  backend:
+    image: ${SQLQUERY_BACKEND_IMAGE:-dataagent-backend:latest}
+    container_name: deerflow-backend
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      # 同源访问，允许 nginx 反代过来的请求
+      FRONTEND_URL: "*"
+    volumes:
+      # workspace 持久化（uploads、sandbox 生成的文件、artifacts）
+      - ${WORKSPACE_DIR:-./data/workspace}:/app/workspace
+    # 镜像默认 CMD 跑在 :80（Dockerfile.backend EXPOSE 80），
+    # 这里显式覆盖到 :8003（避开宿主机/其它服务占用 8001）。
+    # 端口须与 nginx.conf 里 upstream backend_upstream 的端口一致。
+    # 注意：若删除此 command，容器会回到 :80，nginx 将连不上。
+    expose:
+      - "8003"
+    command: ["python3", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8003"]
+    networks:
+      - deerflow-net
+
+  # 注：langgraph-api 镜像已彻底废弃。
+  # LangGraph Platform 兼容接口由 backend 的 langgraph_compat.py 提供，
+  # 不需要单独的 langgraph 容器。
+
+  # ───────────── 统一入口 nginx ─────────────
+  nginx:
+    image: deerflow-nginx:latest
+    container_name: deerflow-nginx
+    restart: unless-stopped
+    volumes:
+      # 用 bundle 里 compose/nginx.conf 覆盖镜像内的配置，
+      # 这样改 upstream 端口等不用重新构建 nginx 镜像。
+      - ./compose/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      # 唯一对外端口
+      - "${EXPOSE_PORT:-80}:80"
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - deerflow-net
+
+networks:
+  deerflow-net:
+    driver: bridge
