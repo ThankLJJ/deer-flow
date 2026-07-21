@@ -37,7 +37,6 @@ $SqlQueryRoot = if ($env:SQLQUERY_ROOT) { $env:SQLQUERY_ROOT } else { 'C:\Users\
 
 $BundleDir  = Join-Path $ScriptDir   'deerflow-offline-bundle'
 $ImagesDir  = Join-Path $BundleDir   'images'
-$SrcDir     = Join-Path $BundleDir   'sqlquery-src'
 $ComposeDir = Join-Path $BundleDir   'compose'
 
 # 镜像标签（langgraph-api 镜像已废弃，改用 backend 内嵌兼容层）
@@ -96,7 +95,7 @@ if (-not (Test-Path (Join-Path $SqlQueryRoot 'Dockerfile.backend'))) {
 # ============================================================
 Write-Step "清理旧产物..."
 if (Test-Path $BundleDir) { Remove-Item -Recurse -Force $BundleDir }
-New-Item -ItemType Directory -Force -Path $ImagesDir, $SrcDir, $ComposeDir | Out-Null
+New-Item -ItemType Directory -Force -Path $ImagesDir, $ComposeDir | Out-Null
 
 # ============================================================
 # Step 1: 构建 frontend 镜像
@@ -164,45 +163,16 @@ Save-And-Gzip -Image $NginxImage     -OutName 'deerflow-nginx'
 Save-And-Gzip -Image $BackendImage   -OutName 'dataagent-backend'
 
 # ============================================================
-# Step 6: 打包 sqlQuery 源码（LangGraph Server 挂载用）
-# ============================================================
-Write-Step "打包 sqlQuery 源码（LangGraph Server 需要）..."
-
-# 只拷 LangGraph 容器运行必需的文件，不拷 .venv/.git/workspace/data/__pycache__ 等
-New-Item -ItemType Directory -Force -Path (Join-Path $SrcDir 'backend') | Out-Null
-Copy-Item -Recurse -Force (Join-Path $SqlQueryRoot 'backend') (Join-Path $SrcDir 'backend')
-
-if (Test-Path (Join-Path $SqlQueryRoot 'langgraph.json')) {
-    Copy-Item -Force (Join-Path $SqlQueryRoot 'langgraph.json') $SrcDir
-}
-if (Test-Path (Join-Path $SqlQueryRoot 'requirements.txt')) {
-    Copy-Item -Force (Join-Path $SqlQueryRoot 'requirements.txt') $SrcDir
-}
-if (Test-Path (Join-Path $SqlQueryRoot 'workspace')) {
-    Copy-Item -Recurse -Force (Join-Path $SqlQueryRoot 'workspace') (Join-Path $SrcDir 'workspace')
-}
-
-# 清掉 __pycache__ 和 .pyc
-Get-ChildItem -Path $SrcDir -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-Get-ChildItem -Path $SrcDir -Recurse -Filter '*.pyc' -ErrorAction SilentlyContinue |
-    Remove-Item -Force -ErrorAction SilentlyContinue
-
-# 放一份空 .env 模板，服务器上再填实际值
-Copy-Item -Force (Join-Path $ScriptDir '.env.docker.example') (Join-Path $SrcDir '.env')
-
-$srcSize = (Get-ChildItem -Recurse $SrcDir | Measure-Object -Property Length -Sum).Sum / 1MB
-Write-Host "   sqlquery-src 大小：$([math]::Round($srcSize, 2)) MB"
-
-# ============================================================
-# Step 7: 拷贝 compose 文件 + 部署脚本 + 文档
+# Step 5: 拷贝 compose 文件 + 部署脚本 + 文档
 # ============================================================
 Write-Step "拷贝部署文件..."
 Copy-Item -Force (Join-Path $ScriptDir 'docker-compose.offline.yml') $ComposeDir
 Copy-Item -Force (Join-Path $ScriptDir 'nginx\nginx.conf') $ComposeDir
-Copy-Item -Force (Join-Path $ScriptDir 'deploy-offline.sh') $BundleDir
+Copy-Item -Force (Join-Path $ScriptDir 'manage.sh') $BundleDir
+Copy-Item -Force (Join-Path $ScriptDir 'diagnose.sh') $BundleDir
 Copy-Item -Force (Join-Path $ScriptDir '.env.docker.example') $BundleDir
 Copy-Item -Force (Join-Path $ScriptDir 'README-offline.md') $BundleDir
+Copy-Item -Force (Join-Path $ScriptDir 'DEV-NOTES.md') $BundleDir
 
 # ============================================================
 # 汇总
@@ -221,7 +191,7 @@ Get-ChildItem -Path $BundleDir -Recurse -Depth 1 | ForEach-Object {
 }
 Write-Host ""
 Write-Host "各部分大小："
-foreach ($d in @($ImagesDir, $SrcDir, $ComposeDir)) {
+foreach ($d in @($ImagesDir, $ComposeDir)) {
     $size = (Get-ChildItem -Recurse $d -File | Measure-Object -Property Length -Sum).Sum / 1MB
     Write-Host ("  {0,-20} {1,8:N2} MB" -f (Split-Path $d -Leaf), $size)
 }

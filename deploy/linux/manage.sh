@@ -22,7 +22,6 @@ IMAGES_DIR="$BUNDLE_DIR/images"
 COMPOSE_DIR="$BUNDLE_DIR/compose"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.offline.yml"
 ENV_FILE="$BUNDLE_DIR/.env.docker"
-SRC_DIR="$BUNDLE_DIR/sqlquery-src"
 
 # ---- 颜色 ----
 GREEN='\033[0;32m'
@@ -66,15 +65,7 @@ ensure_env() {
         fi
     fi
 
-    # 确保 sqlquery-src/.env 存在（LangGraph 兼容层读取）
-    if [ ! -f "$SRC_DIR/.env" ]; then
-        cp "$BUNDLE_DIR/.env.docker.example" "$SRC_DIR/.env"
-        warn "已创建 $SRC_DIR/.env，请填入实际值"
-    fi
-
     # 确保路径配置
-    grep -q '^SQLQUERY_PATH=' "$ENV_FILE" 2>/dev/null || \
-        echo "SQLQUERY_PATH=$SRC_DIR" >> "$ENV_FILE"
     grep -q '^WORKSPACE_DIR=' "$ENV_FILE" 2>/dev/null || \
         echo "WORKSPACE_DIR=$BUNDLE_DIR/data/workspace" >> "$ENV_FILE"
 
@@ -164,27 +155,22 @@ cmd_logs() {
 }
 
 cmd_update() {
-    # 更新后端代码（docker cp + commit + 重启）
+    # 更新后端镜像（从 tar.gz 加载）
     preflight
-    info "更新后端代码（从 sqlquery-src 同步到容器）..."
-
-    if [ ! -d "$SRC_DIR/backend" ]; then
-        err "找不到源码目录：$SRC_DIR/backend"; exit 1
+    local gz="$IMAGES_DIR/dataagent-backend.tar.gz"
+    if [ ! -f "$gz" ]; then
+        err "找不到后端镜像：$gz"
+        err "请在开发机重新构建镜像并导出，然后传到此目录"
+        exit 1
     fi
-
-    # 用临时容器同步整个 backend 目录
-    local img=$(grep -E '^SQLQUERY_BACKEND_IMAGE=' "$ENV_FILE" 2>/dev/null | cut -d= -f2 || echo "dataagent-backend:latest")
-    docker create --name temp-update "$img" >/dev/null 2>&1 || true
-    docker cp "$SRC_DIR/backend/." temp-update:/app/backend/
-    docker commit temp-update "$img"
-    docker rm temp-update >/dev/null 2>&1
-
-    info "后端镜像已更新，重启 backend..."
+    info "加载后端镜像..."
+    gunzip -c "$gz" | docker load
+    info "重启 backend..."
     compose up -d --force-recreate backend
     sleep 5
     cmd_status
     echo ""
-    info "更新完成。"
+    info "后端更新完成。"
 }
 
 cmd_update_frontend() {
