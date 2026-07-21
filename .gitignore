@@ -64,6 +64,21 @@ deploy/linux/.obsidian/
 
 # One-off helper script
 deploy/linux/_write_readme.py
+
+# Local deploy config / secrets (contains DB passwords, API keys, intranet IPs)
+deploy/linux/.env.docker
+deploy/linux/.env.docker.bak
+deploy/linux/.sync-config.json
+
+# Local deploy runtime data (workspace uploads, sandbox artifacts)
+deploy/linux/data/
+
+# Build/export logs from build-and-export.ps1 & sync-deploy.ps1
+deploy/linux/*.log
+
+# Local-only tool state (graph index, agent plans)
+.codegraph/
+.zcode/
 .playwright-mcp
 /frontend/test-results/
 /frontend/playwright-report/
