@@ -1,0 +1,64 @@
+# ============================================================
+# 本地 Docker 验证用 compose（frontend + backend + nginx，无 langgraph）
+#
+# 用法（在 deploy/linux 目录下）：
+#   docker compose -f docker-compose.local.yml --env-file .env.docker up -d
+#
+# 对外访问：http://localhost:${EXPOSE_PORT:-8098}
+# ============================================================
+
+services:
+  # ───────────── 前端（Next.js standalone，镜像已烘焙好配置）─────────────
+  frontend:
+    image: deerflow-frontend:latest
+    container_name: deerflow-frontend
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      NODE_ENV: production
+      DEER_FLOW_AUTH_DISABLED: "1"
+    networks:
+      - deerflow-net
+
+  # ───────────── FastAPI 后端（含 langgraph_compat 兼容层）─────────────
+  backend:
+    image: ${SQLQUERY_BACKEND_IMAGE:-dataagent-backend:latest}
+    container_name: deerflow-backend
+    restart: unless-stopped
+    env_file:
+      - .env.docker
+    environment:
+      # 同源访问，允许 nginx 反代过来的请求
+      FRONTEND_URL: "*"
+    volumes:
+      # workspace 持久化（uploads、sandbox 生成的文件、artifacts）
+      - ${WORKSPACE_DIR:-./data/workspace}:/app/workspace
+      # skills 已烘焙进镜像（Dockerfile.backend: COPY skills/ skills/），无需挂载
+    # 端口与 nginx 镜像内 upstream backend:8003 对齐
+    expose:
+      - "8003"
+    command: ["python3", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8003"]
+    networks:
+      - deerflow-net
+
+  # ───────────── 统一入口 nginx ─────────────
+  nginx:
+    image: deerflow-nginx:latest
+    container_name: deerflow-nginx
+    restart: unless-stopped
+    volumes:
+      # 挂载本地配置（移除了 langgraph upstream，避免无 langgraph 容器时启动失败）
+      - ./nginx/nginx.local.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      # 唯一对外端口（.env.docker 里 EXPOSE_PORT=8098）
+      - "${EXPOSE_PORT:-8098}:80"
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - deerflow-net
+
+networks:
+  deerflow-net:
+    driver: bridge
