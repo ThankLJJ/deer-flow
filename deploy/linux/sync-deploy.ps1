@@ -192,14 +192,14 @@ if ($SetupKey) {
 if (-not $BuildOnly) {
     Step "检查 SSH 免密登录..."
     # BatchMode=yes：禁用交互式认证。密钥免密没配好就立即失败，不会卡在密码提示。
-    # try/catch 接住 Stop 模式下原生程序 stderr 触发的异常，转为可控的报错提示。
-    $probe = $null
-    try {
-        $probe = & ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 "${ServerUser}@${ServerIp}" 'echo KEYAUTH_OK' 2>$null
-    } catch {
-        $probe = $null
-    }
-    if (-not $probe -or ($probe -notmatch 'KEYAUTH_OK')) {
+    # 以退出码判定结果，并在调用点局部降级 ErrorActionPreference：ssh 的 stderr 警告
+    # （如 OpenSSH 10 的 post-quantum 提示）在 Stop 模式下经 2>$null 重定向会被
+    # 包装成终止性异常，直接判"免密失败"是误报。
+    $ErrorActionPreference = 'Continue'
+    & ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 "${ServerUser}@${ServerIp}" 'echo KEYAUTH_OK' 2>$null
+    $sshExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($sshExit -ne 0) {
         Write-Host ""
         Write-Host "============================================================" -ForegroundColor Red
         Write-Host " SSH 免密未配置！" -ForegroundColor Red
@@ -303,23 +303,28 @@ function Build-Image($Name, $Dockerfile, $Tag, $Context, $ExtraArgs) {
     OK "$Name 构建完成"
 }
 
-# ---- 导出镜像为 tar.gz ----
-function Export-Image($Tag, $OutName) {
-    $tarPath = Join-Path $TempDir "$OutName.tar"
+# ---- 压缩已导出的 tar 为 tar.gz ----
+function Compress-ExportedTar($TarPath, $OutName) {
     $gzPath = Join-Path $TempDir "$OutName.tar.gz"
-    Step "导出 $Tag ..."
-    docker save $Tag -o $tarPath
-    if ($LASTEXITCODE -ne 0) { throw "导出失败：$Tag" }
-    $srcBytes = [System.IO.File]::ReadAllBytes($tarPath)
+    $srcBytes = [System.IO.File]::ReadAllBytes($TarPath)
     $outStream = [System.IO.File]::Create($gzPath)
     try {
         $gz = New-Object System.IO.Compression.GZipStream($outStream, [System.IO.Compression.CompressionMode]::Compress)
         try { $gz.Write($srcBytes, 0, $srcBytes.Length) } finally { $gz.Close() }
     } finally { $outStream.Close() }
-    Remove-Item $tarPath -Force
+    Remove-Item $TarPath -Force
     $sizeMB = [math]::Round((Get-Item $gzPath).Length / 1MB, 1)
     OK "$OutName.tar.gz ($sizeMB MB)"
     return $gzPath
+}
+
+# ---- 导出镜像为 tar.gz ----
+function Export-Image($Tag, $OutName) {
+    $tarPath = Join-Path $TempDir "$OutName.tar"
+    Step "导出 $Tag ..."
+    docker save $Tag -o $tarPath
+    if ($LASTEXITCODE -ne 0) { throw "导出失败：$Tag" }
+    return Compress-ExportedTar $tarPath $OutName
 }
 
 # ---- SCP 传输 ----
@@ -332,9 +337,15 @@ function Send-File($LocalPath, $RemotePath) {
 }
 
 # ---- SSH 执行远程命令 ----
-function Invoke-Remote($Command) {
+# -ThrowOnError：失败即抛异常。仅用于关键步骤（镜像加载/compose up）——
+# 曾因吞掉 compose up 的失败（离线服务器拉取 langgraph 镜像超时），
+# 导致"健康检查 200 但容器仍在跑旧镜像"的假成功，验证阶段才暴露。
+function Invoke-Remote($Command, [switch]$ThrowOnError) {
     & ssh "${ServerUser}@${ServerIp}" $Command
-    if ($LASTEXITCODE -ne 0) { Warn "远程命令返回非零（可能正常）" }
+    if ($LASTEXITCODE -ne 0) {
+        if ($ThrowOnError) { throw "远程命令失败（退出码 $LASTEXITCODE）。请查看上方 docker compose 输出定位原因。" }
+        Warn "远程命令返回非零（可能正常）"
+    }
 }
 
 # ============================================================
@@ -383,11 +394,20 @@ if ($doFrontend) {
 }
 
 if ($doBackend) {
-    Build-Image "backend" `
-        (Join-Path $SqlQueryRoot 'Dockerfile.backend') `
-        'dataagent-backend:latest' `
+    # backend 体积大：docker save 需在 daemon 侧整包缓冲 tar，在受限内存环境会
+    # OOM/触发故障（2026-10-02 实测）。改用 buildx 直出 docker-archive：
+    # 构建与导出一步完成、流式写入、层保持压缩（tar 体积约为 docker save 的 1/3）。
+    # 镜像不落地本地 store —— 部署只需 tar 包（服务器侧 docker load + compose up）。
+    Step "构建并导出 backend ..."
+    $backendTar = Join-Path $TempDir 'dataagent-backend.tar'
+    & docker buildx build `
+        --platform 'linux/amd64' `
+        -f (Join-Path $SqlQueryRoot 'Dockerfile.backend') `
+        -t 'dataagent-backend:latest' `
+        --output "type=docker,dest=$backendTar" `
         $SqlQueryRoot
-    $exportedFiles += Export-Image 'dataagent-backend:latest' 'dataagent-backend'
+    if ($LASTEXITCODE -ne 0) { throw "backend 构建/导出失败（若为镜像源 TLS 超时，重跑一次即可）" }
+    $exportedFiles += Compress-ExportedTar $backendTar 'dataagent-backend'
 }
 
 if ($doNginx) {
@@ -547,7 +567,7 @@ sleep 5
 echo 'done'
 "@
 
-Invoke-Remote $remoteScript
+Invoke-Remote $remoteScript -ThrowOnError
 OK "服务器已更新并重启"
 
 # ---- 4. 验证 ----
@@ -577,7 +597,9 @@ if ($doBackend) {
     } else {
         Warn "镜像可能未生效！容器运行: $runningImageId"
         Warn "                最新镜像: $loadedImageId"
-        Warn "排查: cd $RemoteRunDir && docker compose -f docker-compose.offline.yml --env-file .env.docker up -d --force-recreate backend"
+        # 排查命令须与脚本实际执行的一致（含 nginx）——只 up backend 会绕过
+        # nginx 的服务依赖，掩盖"依赖服务拉取失败"这类真实故障。
+        Warn "排查: ssh ${ServerUser}@${ServerIp} 'cd $RemoteRunDir && docker compose -f docker-compose.offline.yml --env-file .env.docker up -d --force-recreate backend nginx'"
     }
 }
 
